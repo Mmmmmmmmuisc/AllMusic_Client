@@ -6,70 +6,84 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      FABRIC_REPO_URL: "https://maven.fabricmc.net/"
-      YARN_VERSION: "1.21.7+build.15"
-      GRADLE_VERSION: "8.7"
-      # 明确项目根目录（与检出路径一致）
-      PROJECT_ROOT: "."
+    defaults:
+      run:
+        # 强制所有命令在项目根目录执行（关键修复）
+        working-directory: .
 
     steps:
-      - name: 检出代码（确保完整检出所有文件）
+      - name: 检出代码
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 拉取完整历史，避免文件缺失
+          fetch-depth: 1
 
-      - name: 验证工作目录文件
+      - name: 显示工作目录结构（调试用）
         run: |
-          echo "当前工作目录: $(pwd)"
-          ls -la  # 列出所有文件，确认是否有源码文件
-          # 若输出中没有你的Java源码文件，说明检出路径错误
+          echo "当前目录: $(pwd)"
+          ls -la
+          echo "-------------------------"
+          echo "是否存在src目录: $(ls -d src 2>/dev/null || echo '不存在')"
 
-      - name: 清理缓存
+      - name: 清理旧缓存
         run: |
-          rm -rf ~/.gradle/caches/modules-2/files-2.1/net.fabricmc/yarn/
-          rm -rf ./.gradle/loom-cache/
+          rm -rf ~/.gradle/caches/
+          rm -rf .gradle/
+          rm -f gradlew*
 
-      - name: 设置Java 21
+      - name: 配置Java 21
         uses: actions/setup-java@v4
         with:
           java-version: "21"
           distribution: "temurin"
-          cache: gradle
-          # 修正缓存路径：使用通配符匹配可能的文件位置
-          cache-dependency-path: "**/*.gradle"
 
-      - name: 安装Gradle
+      - name: 手动安装Gradle并生成Wrapper（关键步骤）
         run: |
-          wget "https://services.gradle.org/distributions/gradle-${{ env.GRADLE_VERSION }}-bin.zip" -O gradle.zip
+          # 下载并解压Gradle 8.7
+          wget https://services.gradle.org/distributions/gradle-8.7-bin.zip -O gradle.zip
           unzip -q gradle.zip
-          export GRADLE_HOME=$(pwd)/gradle-${{ env.GRADLE_VERSION }}
-          echo "$GRADLE_HOME/bin" >> $GITHUB_PATH
-          gradle --version
-
-      - name: 创建Gradle配置文件（确保在项目根目录）
-        run: |
-          # 明确在项目根目录创建文件
-          cd ${{ env.PROJECT_ROOT }}
+          export GRADLE_HOME=$(pwd)/gradle-8.7
+          export PATH=$GRADLE_HOME/bin:$PATH
           
-          cat > settings.gradle << EOF
+          # 验证Gradle安装
+          gradle --version || { echo "Gradle安装失败"; exit 1; }
+          
+          # 生成Wrapper（指定输出目录为当前目录）
+          gradle wrapper \
+            --gradle-version 8.7 \
+            --distribution-type bin \
+            --no-daemon
+          
+          # 验证Wrapper文件是否生成
+          if [ ! -f "gradlew" ]; then
+              echo "错误：未生成gradlew文件"
+              ls -la
+              exit 1
+          fi
+          chmod +x gradlew
+          echo "Wrapper生成成功"
+
+      - name: 创建必要的Gradle配置文件
+        run: |
+          # 创建settings.gradle
+          cat > settings.gradle << 'EOF'
           pluginManagement {
               repositories {
-                  maven { url "${{ env.FABRIC_REPO_URL }}" }
+                  maven { url "https://maven.fabricmc.net/" }
                   gradlePluginPortal()
               }
           }
           rootProject.name = "allmusic-client"
           EOF
 
-          cat > build.gradle << EOF
+          # 创建build.gradle
+          cat > build.gradle << 'EOF'
           plugins {
               id 'fabric-loom' version '1.6.5'
               id 'maven-publish'
           }
 
           repositories {
-              maven { url "${{ env.FABRIC_REPO_URL }}" }
+              maven { url "https://maven.fabricmc.net/" }
               mavenCentral()
           }
 
@@ -77,10 +91,10 @@ jobs:
           group = project.maven_group
 
           dependencies {
-              minecraft "com.mojang:minecraft:\${minecraft_version}"
-              mappings "net.fabricmc:yarn:${{ env.YARN_VERSION }}:v2"
-              modImplementation "net.fabricmc:fabric-loader:\${loader_version}"
-              modImplementation "net.fabricmc.fabric-api:fabric-api:\${fabric_version}"
+              minecraft "com.mojang:minecraft:${minecraft_version}"
+              mappings "net.fabricmc:yarn:${yarn_mappings}:v2"
+              modImplementation "net.fabricmc:fabric-loader:${loader_version}"
+              modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
           }
 
           tasks.withType(JavaCompile).configureEach {
@@ -93,9 +107,10 @@ jobs:
           }
           EOF
 
-          cat > gradle.properties << EOF
+          # 创建gradle.properties
+          cat > gradle.properties << 'EOF'
           minecraft_version=1.21.7
-          yarn_mappings=${{ env.YARN_VERSION }}
+          yarn_mappings=1.21.7+build.15
           loader_version=0.16.15
           fabric_version=0.110.1+1.21.7
           mod_version=3.0.7
@@ -103,36 +118,30 @@ jobs:
           archives_base_name=allmusic-client
           EOF
 
-          # 确认文件已创建
+          # 验证配置文件是否创建
           ls -la *.gradle
           ls -la gradle.properties
 
-      - name: 生成Gradle Wrapper
-        run: |
-          cd ${{ env.PROJECT_ROOT }}
-          gradle wrapper \
-            --gradle-version ${{ env.GRADLE_VERSION }} \
-            --distribution-type bin \
-            --no-daemon
-
       - name: 执行构建
         run: |
-          cd ${{ env.PROJECT_ROOT }}
-          chmod +x gradlew
           ./gradlew clean build --stacktrace --info
 
       - name: 上传构建产物
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AllMusic-1.21.7-Fabric
-          path: ${{ env.PROJECT_ROOT }}/build/libs/*.jar  # 明确产物路径
+          name: allmusic-build
+          path: |
+            build/libs/*.jar
+            build/libs/*.zip
 
-      - name: 上传错误日志（修正路径格式）
+      - name: 上传错误日志（修复路径格式）
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-errors
           path: |
-            ${{ env.PROJECT_ROOT }}/build/reports/**/*
-            ~/.gradle/caches/**/*  # 修正：去掉路径中的空格，使用通配符
+            build/reports/**/*
+            .gradle/**/*
+            ~/.gradle/caches/**/*
+          retention-days: 5
