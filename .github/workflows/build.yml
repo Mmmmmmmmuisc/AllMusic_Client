@@ -17,35 +17,40 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: 手动安装Gradle 8.7
+      - name: 强制安装兼容版本的Gradle（8.7）
         run: |
+          # 彻底清除可能存在的高版本Gradle
+          rm -rf /opt/gradle
           wget https://services.gradle.org/distributions/gradle-8.7-bin.zip
           unzip -q gradle-8.7-bin.zip
           export GRADLE_INSTALL_DIR=$(pwd)/gradle-8.7
-          echo "使用Gradle路径: $GRADLE_INSTALL_DIR"
+          # 优先使用手动安装的版本
+          echo "$GRADLE_INSTALL_DIR/bin" >> $GITHUB_PATH
+          # 验证版本
+          gradle --version
 
       - name: 创建Gradle核心配置文件
         run: |
-          # 创建settings.gradle
+          # 创建settings.gradle（指定插件仓库）
           cat > settings.gradle << 'EOF'
           pluginManagement {
               repositories {
-                  maven { url "https://maven.fabricmc.net/" } // Fabric官方仓库
-                  gradlePluginPortal() // Gradle中央仓库
+                  maven { url "https://maven.fabricmc.net/" }
+                  gradlePluginPortal()
               }
           }
           rootProject.name = 'allmusic-client'
           EOF
 
-          # 创建build.gradle（添加插件仓库）
+          # 创建build.gradle（使用兼容的loom版本）
           cat > build.gradle << 'EOF'
           plugins {
-              id 'fabric-loom' version '1.7-SNAPSHOT'
+              id 'fabric-loom' version '1.6.5' // 1.6.x与Gradle 8.7更兼容
               id 'maven-publish'
           }
 
           repositories {
-              maven { url "https://maven.fabricmc.net/" } // Fabric依赖仓库
+              maven { url "https://maven.fabricmc.net/" }
               mavenCentral()
           }
 
@@ -79,9 +84,9 @@ jobs:
           archives_base_name=allmusic-client
           EOF
 
-      - name: 生成Gradle Wrapper
+      - name: 生成Gradle Wrapper（强制8.7版本）
         run: |
-          $GRADLE_INSTALL_DIR/bin/gradle wrapper \
+          gradle wrapper \
             --gradle-version 8.7 \
             --distribution-type bin \
             --no-daemon
