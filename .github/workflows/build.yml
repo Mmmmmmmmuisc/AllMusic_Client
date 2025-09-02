@@ -22,9 +22,13 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
+    - name: 生成Gradle Wrapper文件（包含gradlew）
+      run: |
+        # 手动生成gradlew和相关配置文件，适配8.7版本
+        gradle wrapper --gradle-version 8.7
+
     - name: 配置1.21.7版本参数
       run: |
-        # 修改gradle.properties中的版本信息
         echo "minecraft_version=1.21.7" >> gradle.properties
         echo "yarn_mappings=1.21.7+build.12" >> gradle.properties
         echo "loader_version=0.16.15" >> gradle.properties
@@ -32,10 +36,10 @@ jobs:
 
     - name: 执行构建命令
       run: |
-        chmod +x gradlew
+        chmod +x gradlew  # 赋予执行权限
         ./gradlew clean build
 
-    - name: 上传构建产物（JAR文件）
+    - name: 上传构建产物
       uses: actions/upload-artifact@v4
       with:
         name: allmusic-1.21.7-fabric
