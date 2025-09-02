@@ -10,17 +10,25 @@ jobs:
       FABRIC_REPO_URL: "https://maven.fabricmc.net/"
       YARN_VERSION: "1.21.7+build.15"
       GRADLE_VERSION: "8.7"
+      # 明确项目根目录（与检出路径一致）
+      PROJECT_ROOT: "."
 
     steps:
-      - name: 检出代码
+      - name: 检出代码（确保完整检出所有文件）
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 拉取完整历史，避免文件缺失
+
+      - name: 验证工作目录文件
+        run: |
+          echo "当前工作目录: $(pwd)"
+          ls -la  # 列出所有文件，确认是否有源码文件
+          # 若输出中没有你的Java源码文件，说明检出路径错误
 
       - name: 清理缓存
         run: |
           rm -rf ~/.gradle/caches/modules-2/files-2.1/net.fabricmc/yarn/
           rm -rf ./.gradle/loom-cache/
-          rm -rf ~/.gradle/caches/fabric-loom/
-          rm -rf ~/.gradle/wrapper/dists/gradle-${{ env.GRADLE_VERSION }}-bin/
 
       - name: 设置Java 21
         uses: actions/setup-java@v4
@@ -28,9 +36,8 @@ jobs:
           java-version: "21"
           distribution: "temurin"
           cache: gradle
-          cache-dependency-path: |
-            gradle/wrapper/gradle-wrapper.properties
-            build.gradle
+          # 修正缓存路径：使用通配符匹配可能的文件位置
+          cache-dependency-path: "**/*.gradle"
 
       - name: 安装Gradle
         run: |
@@ -40,8 +47,11 @@ jobs:
           echo "$GRADLE_HOME/bin" >> $GITHUB_PATH
           gradle --version
 
-      - name: 创建配置文件
+      - name: 创建Gradle配置文件（确保在项目根目录）
         run: |
+          # 明确在项目根目录创建文件
+          cd ${{ env.PROJECT_ROOT }}
+          
           cat > settings.gradle << EOF
           pluginManagement {
               repositories {
@@ -81,11 +91,6 @@ jobs:
           loom {
               remapJar { enabled = true }
           }
-
-          tasks.named('jar') {
-              archiveBaseName.set("AllMusic-\${project.mod_version}-1.21.7")
-              archiveClassifier.set("fabric")
-          }
           EOF
 
           cat > gradle.properties << EOF
@@ -98,8 +103,13 @@ jobs:
           archives_base_name=allmusic-client
           EOF
 
-      - name: 生成Wrapper
+          # 确认文件已创建
+          ls -la *.gradle
+          ls -la gradle.properties
+
+      - name: 生成Gradle Wrapper
         run: |
+          cd ${{ env.PROJECT_ROOT }}
           gradle wrapper \
             --gradle-version ${{ env.GRADLE_VERSION }} \
             --distribution-type bin \
@@ -107,21 +117,22 @@ jobs:
 
       - name: 执行构建
         run: |
+          cd ${{ env.PROJECT_ROOT }}
           chmod +x gradlew
           ./gradlew clean build --stacktrace --info
 
-      - name: 上传产物
+      - name: 上传构建产物
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: AllMusic-1.21.7-Fabric
-          path: "build/libs/*.jar"
+          path: ${{ env.PROJECT_ROOT }}/build/libs/*.jar  # 明确产物路径
 
-      - name: 上传错误日志
+      - name: 上传错误日志（修正路径格式）
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-errors
           path: |
-            build/reports/
-            ~/.gradle/caches/
+            ${{ env.PROJECT_ROOT }}/build/reports/**/*
+            ~/.gradle/caches/**/*  # 修正：去掉路径中的空格，使用通配符
