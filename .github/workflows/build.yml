@@ -8,8 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ROOT_DIR: /home/runner/work/AllMusic_Client/AllMusic_Client
-      # 使用经过验证的兼容版本组合
-      GRADLE_VERSION: "8.5"  # 与Loom 1.6.5完全兼容的版本
+      GRADLE_VERSION: "8.5"
       LOOM_VERSION: "1.6.5"
       YARN_VERSION: "1.21.7+build.15"
 
@@ -17,39 +16,40 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 验证工作目录
+      - name: 清理旧环境
         run: |
-          echo "当前目录: $(pwd)"
-          if [ "$(pwd)" != "${{ env.ROOT_DIR }}" ]; then
-              echo "错误：工作目录不匹配"
-              exit 1
+          sudo apt-get purge -y gradle
+          sudo rm -rf /usr/share/gradle/
+          rm -rf ~/.gradle/ ~/.cache/gradle/
+          rm -rf ${{ env.ROOT_DIR }}/.gradle/ ${{ env.ROOT_DIR }}/gradle/
+          rm -f ${{ env.ROOT_DIR }}/gradlew* ${{ env.ROOT_DIR }}/*.gradle
+          if command -v gradle &> /dev/null; then
+              echo "错误：未彻底清理旧Gradle" && exit 1
           fi
-
-      - name: 清理旧文件和缓存
-        run: |
-          rm -rf .gradle/ gradle/ gradlew*
-          rm -f settings.gradle build.gradle gradle.properties
-          rm -rf ~/.gradle/caches/
 
       - name: 配置Java 21
         uses: actions/setup-java@v4
         with:
           java-version: "21"
           distribution: "temurin"
+          cache: none
 
-      - name: 安装兼容版本的Gradle (8.5)
+      - name: 安装Gradle ${{ env.GRADLE_VERSION }}
         run: |
-          wget https://services.gradle.org/distributions/gradle-${{ env.GRADLE_VERSION }}-bin.zip -O gradle.zip
-          unzip -q gradle.zip
-          export GRADLE_HOME=$(pwd)/gradle-${{ env.GRADLE_VERSION }}
-          export PATH=$GRADLE_HOME/bin:$PATH
-          gradle --version
+          wget "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -O gradle.zip
+          unzip -q gradle.zip -d /opt/
+          echo "GRADLE_HOME=/opt/gradle-${GRADLE_VERSION}" >> $GITHUB_ENV
+          echo "/opt/gradle-${GRADLE_VERSION}/bin" >> $GITHUB_PATH
+          source $GITHUB_ENV
+          ACTUAL=$(gradle --version | grep "Gradle" | awk '{print $2}')
+          if [ "$ACTUAL" != "$GRADLE_VERSION" ]; then
+              echo "版本不匹配：$ACTUAL vs $GRADLE_VERSION" && exit 1
+          fi
 
-      - name: 创建兼容的Gradle配置文件
+      - name: 创建Gradle配置文件
         run: |
           cd ${{ env.ROOT_DIR }}
           
-          # 创建settings.gradle（限制插件版本）
           cat > settings.gradle << 'EOF'
           pluginManagement {
               repositories {
@@ -57,16 +57,16 @@ jobs:
                   gradlePluginPortal()
               }
               plugins {
-                  id 'fabric-loom' version '1.6.5' apply false
+                  id 'fabric-loom' version '1.6.5'
               }
           }
           rootProject.name = "allmusic-client"
           EOF
 
-          # 创建build.gradle（移除问题特性）
           cat > build.gradle << 'EOF'
           plugins {
               id 'fabric-loom'
+              id 'java'
               id 'maven-publish'
           }
 
@@ -85,27 +85,21 @@ jobs:
               modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
           }
 
+          java {
+              sourceCompatibility = JavaVersion.VERSION_21
+              targetCompatibility = JavaVersion.VERSION_21
+              withSourcesJar()
+          }
+
           tasks.withType(JavaCompile).configureEach {
-              options.release = 21
               options.encoding = "UTF-8"
           }
 
-          // 简化Loom配置，避免使用问题API
           loom {
-              runs {
-                  client {
-                      client()
-                      configName = "Client"
-                  }
-                  server {
-                      server()
-                      configName = "Server"
-                  }
-              }
+              remapJar { enabled = true }
           }
           EOF
 
-          # 创建gradle.properties
           cat > gradle.properties << 'EOF'
           minecraft_version=1.21.7
           yarn_mappings=1.21.7+build.15
@@ -116,30 +110,29 @@ jobs:
           archives_base_name=allmusic-client
           EOF
 
-          # 验证文件创建
-          ls -la *.gradle
-          cat settings.gradle
-
       - name: 生成Gradle Wrapper
         run: |
           cd ${{ env.ROOT_DIR }}
-          gradle wrapper \
-            --gradle-version ${{ env.GRADLE_VERSION }} \
+          /opt/gradle-${GRADLE_VERSION}/bin/gradle wrapper \
+            --gradle-version $GRADLE_VERSION \
             --distribution-type bin \
             --no-daemon
           chmod +x gradlew
+          if ! grep -q "$GRADLE_VERSION" gradle/wrapper/gradle-wrapper.properties; then
+              echo "Wrapper版本错误" && exit 1
+          fi
 
-      - name: 执行构建（禁用问题特性）
+      - name: 执行构建
         run: |
           cd ${{ env.ROOT_DIR }}
-          # 添加参数禁用Gradle 8.5+的问题报告特性
-          ./gradlew clean build --stacktrace -Porg.gradle.problems.throw-uncaught=true
+          ./gradlew clean build --stacktrace \
+            -Porg.gradle.problems.throw-uncaught=true
 
       - name: 上传产物
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: allmusic-build
+          name: AllMusic-1.21.7-Fabric
           path: ${{ env.ROOT_DIR }}/build/libs/*.jar
 
       - name: 上传错误日志
