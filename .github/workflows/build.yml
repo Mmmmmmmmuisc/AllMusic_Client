@@ -6,29 +6,29 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        # 强制所有命令在项目根目录执行（关键修复）
-        working-directory: .
+    env:
+      # 明确项目根目录绝对路径
+      ROOT_DIR: /home/runner/work/AllMusic_Client/AllMusic_Client
 
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
-      - name: 显示工作目录结构（调试用）
+      - name: 验证工作目录
         run: |
-          echo "当前目录: $(pwd)"
-          ls -la
-          echo "-------------------------"
-          echo "是否存在src目录: $(ls -d src 2>/dev/null || echo '不存在')"
+          echo "当前工作目录: $(pwd)"
+          echo "预期根目录: ${{ env.ROOT_DIR }}"
+          # 确保当前目录就是项目根目录
+          if [ "$(pwd)" != "${{ env.ROOT_DIR }}" ]; then
+              echo "错误：工作目录与预期根目录不符"
+              exit 1
+          fi
 
-      - name: 清理旧缓存
+      - name: 清理旧文件（避免冲突）
         run: |
-          rm -rf ~/.gradle/caches/
-          rm -rf .gradle/
-          rm -f gradlew*
+          # 删除可能存在的旧配置文件
+          rm -f settings.gradle build.gradle gradle.properties
+          rm -rf .gradle/ gradle/ gradlew*
 
       - name: 配置Java 21
         uses: actions/setup-java@v4
@@ -36,36 +36,22 @@ jobs:
           java-version: "21"
           distribution: "temurin"
 
-      - name: 手动安装Gradle并生成Wrapper（关键步骤）
+      - name: 安装Gradle 8.7
         run: |
-          # 下载并解压Gradle 8.7
           wget https://services.gradle.org/distributions/gradle-8.7-bin.zip -O gradle.zip
           unzip -q gradle.zip
           export GRADLE_HOME=$(pwd)/gradle-8.7
           export PATH=$GRADLE_HOME/bin:$PATH
-          
-          # 验证Gradle安装
-          gradle --version || { echo "Gradle安装失败"; exit 1; }
-          
-          # 生成Wrapper（指定输出目录为当前目录）
-          gradle wrapper \
-            --gradle-version 8.7 \
-            --distribution-type bin \
-            --no-daemon
-          
-          # 验证Wrapper文件是否生成
-          if [ ! -f "gradlew" ]; then
-              echo "错误：未生成gradlew文件"
-              ls -la
-              exit 1
-          fi
-          chmod +x gradlew
-          echo "Wrapper生成成功"
+          gradle --version
 
-      - name: 创建必要的Gradle配置文件
+      - name: 强制在根目录创建Gradle配置文件（关键步骤）
         run: |
+          # 明确指定在项目根目录创建文件
+          cd ${{ env.ROOT_DIR }} || { echo "无法进入根目录"; exit 1; }
+
           # 创建settings.gradle
-          cat > settings.gradle << 'EOF'
+          echo "创建settings.gradle..."
+          cat > ${{ env.ROOT_DIR }}/settings.gradle << 'EOF'
           pluginManagement {
               repositories {
                   maven { url "https://maven.fabricmc.net/" }
@@ -76,7 +62,8 @@ jobs:
           EOF
 
           # 创建build.gradle
-          cat > build.gradle << 'EOF'
+          echo "创建build.gradle..."
+          cat > ${{ env.ROOT_DIR }}/build.gradle << 'EOF'
           plugins {
               id 'fabric-loom' version '1.6.5'
               id 'maven-publish'
@@ -108,7 +95,8 @@ jobs:
           EOF
 
           # 创建gradle.properties
-          cat > gradle.properties << 'EOF'
+          echo "创建gradle.properties..."
+          cat > ${{ env.ROOT_DIR }}/gradle.properties << 'EOF'
           minecraft_version=1.21.7
           yarn_mappings=1.21.7+build.15
           loader_version=0.16.15
@@ -118,30 +106,61 @@ jobs:
           archives_base_name=allmusic-client
           EOF
 
-          # 验证配置文件是否创建
-          ls -la *.gradle
-          ls -la gradle.properties
+          # 验证文件是否创建成功（关键检查）
+          echo "验证配置文件是否存在："
+          if [ -f "${{ env.ROOT_DIR }}/settings.gradle" ]; then
+              echo "✅ settings.gradle 存在"
+          else
+              echo "❌ settings.gradle 不存在"
+              exit 1
+          fi
+
+          if [ -f "${{ env.ROOT_DIR }}/build.gradle" ]; then
+              echo "✅ build.gradle 存在"
+          else
+              echo "❌ build.gradle 不存在"
+              exit 1
+          fi
+
+          # 显示文件内容（调试用）
+          echo "settings.gradle 内容："
+          cat ${{ env.ROOT_DIR }}/settings.gradle
+          echo "-------------------------"
+
+      - name: 生成Gradle Wrapper
+        run: |
+          cd ${{ env.ROOT_DIR }}
+          gradle wrapper \
+            --gradle-version 8.7 \
+            --distribution-type bin \
+            --no-daemon
+
+          # 验证Wrapper是否生成
+          if [ -f "gradlew" ]; then
+              echo "✅ gradlew 生成成功"
+              chmod +x gradlew
+          else
+              echo "❌ gradlew 生成失败"
+              exit 1
+          fi
 
       - name: 执行构建
         run: |
-          ./gradlew clean build --stacktrace --info
+          cd ${{ env.ROOT_DIR }}
+          ./gradlew clean build --stacktrace
 
-      - name: 上传构建产物
+      - name: 上传产物
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: allmusic-build
-          path: |
-            build/libs/*.jar
-            build/libs/*.zip
+          path: ${{ env.ROOT_DIR }}/build/libs/*.jar
 
-      - name: 上传错误日志（修复路径格式）
+      - name: 上传错误日志
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-errors
           path: |
-            build/reports/**/*
-            .gradle/**/*
-            ~/.gradle/caches/**/*
-          retention-days: 5
+            ${{ env.ROOT_DIR }}/build/reports/**/*
+            ${{ env.ROOT_DIR }}/.gradle/**/*
