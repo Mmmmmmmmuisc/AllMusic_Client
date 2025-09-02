@@ -6,40 +6,69 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: 检出代码
-      uses: actions/checkout@v4
+      - name: 检出代码
+        uses: actions/checkout@v4
 
-    - name: 设置Java环境（Java 21）
-      uses: actions/setup-java@v4
-      with:
-        java-version: '21'
-        distribution: 'temurin'
-        cache: gradle
+      - name: 设置Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
 
-    - name: 生成Gradle Wrapper文件
-      run: gradle wrapper --gradle-version 8.7
+      - name: 手动安装Gradle 8.7（解决Wrapper生成失败）
+        run: |
+          # 手动下载并解压Gradle，避免环境依赖问题
+          wget https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          unzip -q gradle-8.7-bin.zip
+          echo "GRADLE_HOME=$(pwd)/gradle-8.7" >> $GITHUB_ENV
+          echo "$(pwd)/gradle-8.7/bin" >> $GITHUB_PATH
 
-    - name: 配置1.21.7版本参数
-      run: |
-        # 替换现有配置而非追加（避免重复配置）
-        echo "minecraft_version=1.21.7" > gradle.properties
-        echo "yarn_mappings=1.21.7+build.12" >> gradle.properties
-        echo "loader_version=0.16.15" >> gradle.properties
-        echo "fabric_version=0.109.0+1.21.7" >> gradle.properties
-        echo "mod_version=3.0.7" >> gradle.properties
-        echo "maven_group=com.coloryr" >> gradle.properties
-        echo "archives_base_name=allmusic-client" >> gradle.properties
+      - name: 验证Gradle安装
+        run: |
+          gradle --version  # 确认Gradle能正常运行
 
-    - name: 执行构建（显示详细日志）
-      run: |
-        chmod +x gradlew
-        ./gradlew clean build --stacktrace  # 添加--stacktrace显示详细错误
+      - name: 生成Gradle Wrapper（带强制参数）
+        run: |
+          # 使用绝对路径执行，强制生成指定版本的Wrapper
+          $GITHUB_ENV/GRADLE_HOME/bin/gradle wrapper \
+            --gradle-version 8.7 \
+            --distribution-type bin \
+            --no-daemon  # 禁用后台进程，避免权限问题
 
-    - name: 上传构建产物（若成功）
-      if: success()  # 仅当构建成功时上传
-      uses: actions/upload-artifact@v4
-      with:
-        name: allmusic-1.21.7-fabric
-        path: build/libs/*.jar
+      - name: 验证Wrapper文件生成
+        run: |
+          # 检查关键文件是否存在
+          if [ ! -f "gradlew" ]; then
+              echo "错误：gradlew文件未生成"
+              exit 1
+          fi
+          if [ ! -d "gradle/wrapper" ]; then
+              echo "错误：gradle/wrapper目录未生成"
+              exit 1
+          fi
+
+      # 后续步骤（配置版本、构建等）保持不变
+      - name: 配置1.21.7版本参数
+        run: |
+          cat > gradle.properties << 'EOF'
+          minecraft_version=1.21.7
+          yarn_mappings=1.21.7+build.15
+          loader_version=0.16.15
+          fabric_version=0.110.1+1.21.7
+          mod_version=3.0.7
+          maven_group=com.coloryr
+          archives_base_name=allmusic-client
+          EOF
+
+      - name: 执行构建
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build --stacktrace
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: allmusic-1.21.7-fabric
+          path: build/libs/*.jar
