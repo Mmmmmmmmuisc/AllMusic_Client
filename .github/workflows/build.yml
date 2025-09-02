@@ -17,41 +17,48 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: 手动安装Gradle 8.7
+      - name: 手动安装Gradle 8.7（指定兼容版本）
         run: |
-          # 下载并解压Gradle
+          # 使用8.7版本而非最新的9.0，避免兼容性问题
           wget https://services.gradle.org/distributions/gradle-8.7-bin.zip
           unzip -q gradle-8.7-bin.zip
-          
-          # 显式设置Gradle路径（使用绝对路径）
           export GRADLE_INSTALL_DIR=$(pwd)/gradle-8.7
-          echo "Gradle安装路径: $GRADLE_INSTALL_DIR"
-          
-          # 验证Gradle可执行文件存在
-          if [ ! -f "$GRADLE_INSTALL_DIR/bin/gradle" ]; then
-              echo "错误：未找到Gradle可执行文件"
-              exit 1
-          fi
+          echo "使用Gradle路径: $GRADLE_INSTALL_DIR"
 
-      - name: 生成Gradle Wrapper
+      - name: 创建Gradle核心配置文件（关键步骤）
         run: |
-          # 使用显式路径执行Gradle
-          $GRADLE_INSTALL_DIR/bin/gradle wrapper \
-            --gradle-version 8.7 \
-            --distribution-type bin \
-            --no-daemon
+          # 创建settings.gradle（项目识别必需）
+          cat > settings.gradle << 'EOF'
+          rootProject.name = 'allmusic-client'
+          EOF
 
-      - name: 验证Wrapper文件
-        run: |
-          if [ ! -f "gradlew" ]; then
-              echo "错误：gradlew文件未生成"
-              exit 1
-          fi
-          chmod +x gradlew
-          ./gradlew --version  # 验证wrapper是否可用
+          # 创建build.gradle（构建逻辑配置）
+          cat > build.gradle << 'EOF'
+          plugins {
+              id 'fabric-loom' version '1.7-SNAPSHOT'
+              id 'maven-publish'
+          }
 
-      - name: 配置版本参数
-        run: |
+          version = project.mod_version
+          group = project.maven_group
+
+          dependencies {
+              minecraft "com.mojang:minecraft:${minecraft_version}"
+              mappings "net.fabricmc:yarn:${yarn_mappings}:v2"
+              modImplementation "net.fabricmc:fabric-loader:${loader_version}"
+              modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
+          }
+
+          tasks.withType(JavaCompile).configureEach {
+              options.release = 21
+          }
+
+          loom {
+              silentMojangMappingsLicense()
+          }
+          EOF
+
+          # 创建版本配置文件
           cat > gradle.properties << 'EOF'
           minecraft_version=1.21.7
           yarn_mappings=1.21.7+build.15
@@ -62,10 +69,27 @@ jobs:
           archives_base_name=allmusic-client
           EOF
 
-      - name: 执行构建
-        run: ./gradlew clean build --stacktrace
+      - name: 生成Gradle Wrapper
+        run: |
+          $GRADLE_INSTALL_DIR/bin/gradle wrapper \
+            --gradle-version 8.7 \
+            --distribution-type bin \
+            --no-daemon
 
-      - name: 上传产物
+      - name: 验证项目结构
+        run: |
+          echo "当前目录文件:"
+          ls -la
+          echo "Gradle配置文件:"
+          ls -la *.gradle
+
+      - name: 执行构建
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build --stacktrace
+
+      - name: 上传构建产物
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: allmusic-1.21.7-fabric
