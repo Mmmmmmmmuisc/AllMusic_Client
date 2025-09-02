@@ -17,26 +17,36 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: 手动安装Gradle 8.7（指定兼容版本）
+      - name: 手动安装Gradle 8.7
         run: |
-          # 使用8.7版本而非最新的9.0，避免兼容性问题
           wget https://services.gradle.org/distributions/gradle-8.7-bin.zip
           unzip -q gradle-8.7-bin.zip
           export GRADLE_INSTALL_DIR=$(pwd)/gradle-8.7
           echo "使用Gradle路径: $GRADLE_INSTALL_DIR"
 
-      - name: 创建Gradle核心配置文件（关键步骤）
+      - name: 创建Gradle核心配置文件
         run: |
-          # 创建settings.gradle（项目识别必需）
+          # 创建settings.gradle
           cat > settings.gradle << 'EOF'
+          pluginManagement {
+              repositories {
+                  maven { url "https://maven.fabricmc.net/" } // Fabric官方仓库
+                  gradlePluginPortal() // Gradle中央仓库
+              }
+          }
           rootProject.name = 'allmusic-client'
           EOF
 
-          # 创建build.gradle（构建逻辑配置）
+          # 创建build.gradle（添加插件仓库）
           cat > build.gradle << 'EOF'
           plugins {
               id 'fabric-loom' version '1.7-SNAPSHOT'
               id 'maven-publish'
+          }
+
+          repositories {
+              maven { url "https://maven.fabricmc.net/" } // Fabric依赖仓库
+              mavenCentral()
           }
 
           version = project.mod_version
@@ -75,13 +85,6 @@ jobs:
             --gradle-version 8.7 \
             --distribution-type bin \
             --no-daemon
-
-      - name: 验证项目结构
-        run: |
-          echo "当前目录文件:"
-          ls -la
-          echo "Gradle配置文件:"
-          ls -la *.gradle
 
       - name: 执行构建
         run: |
