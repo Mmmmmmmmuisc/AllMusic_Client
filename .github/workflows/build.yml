@@ -1,101 +1,43 @@
-name: Build AllMusic 1.21.7 Fabric
+Run gradle wrapper \
 
-on:
-  workflow_dispatch:
+Welcome to Gradle 8.7!
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+Here are the highlights of this release:
+ - Compiling and testing with Java 22
+ - Cacheable Groovy script compilation
+ - New methods in lazy collection properties
 
-      - name: 设置Java 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: gradle
+For more details see https://docs.gradle.org/8.7/release-notes.html
 
-      - name: 安装Gradle 8.7
-        run: |
-          wget https://services.gradle.org/distributions/gradle-8.7-bin.zip
-          unzip -q gradle-8.7-bin.zip
-          export GRADLE_INSTALL_DIR=$(pwd)/gradle-8.7
-          echo "$GRADLE_INSTALL_DIR/bin" >> $GITHUB_PATH
-          gradle --version
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.7/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
 
-      - name: 创建Gradle配置文件
-        run: |
-          # settings.gradle
-          cat > settings.gradle << 'EOF'
-          pluginManagement {
-              repositories {
-                  maven { url "https://maven.fabricmc.net/" }
-                  gradlePluginPortal()
-              }
-          }
-          rootProject.name = 'allmusic-client'
-          EOF
+> Configure project :
+Fabric Loom: 1.6.5
 
-          # build.gradle（移除不兼容的方法）
-          cat > build.gradle << 'EOF'
-          plugins {
-              id 'fabric-loom' version '1.6.5'
-              id 'maven-publish'
-          }
+FAILURE: Build failed with an exception.
 
-          repositories {
-              maven { url "https://maven.fabricmc.net/" }
-              mavenCentral()
-          }
+* What went wrong:
+A problem occurred configuring root project 'allmusic-client'.
+> Could not resolve all dependencies for configuration ':mappings'.
+   > Could not find net.fabricmc:yarn:1.21.7+build.15.
+     Searched in the following locations:
+       - file:/home/runner/work/AllMusic_Client/AllMusic_Client/.gradle/loom-cache/remapped_mods/net/fabricmc/yarn/1.21.7+build.15/yarn-1.21.7+build.15.pom
+       - file:/home/runner/.gradle/caches/fabric-loom/minecraftMaven/net/fabricmc/yarn/1.21.7+build.15/yarn-1.21.7+build.15.pom
+       - file:/home/runner/work/AllMusic_Client/AllMusic_Client/.gradle/loom-cache/minecraftMaven/net/fabricmc/yarn/1.21.7+build.15/yarn-1.21.7+build.15.pom
+       - https://maven.fabricmc.net/net/fabricmc/yarn/1.21.7+build.15/yarn-1.21.7+build.15.pom
+       - https://libraries.minecraft.net/net/fabricmc/yarn/1.21.7+build.15/yarn-1.21.7+build.15.pom
+       - https://libraries.minecraft.net/net/fabricmc/yarn/1.21.7+build.15/yarn-1.21.7+build.15-v2.jar
+       - https://repo.maven.apache.org/maven2/net/fabricmc/yarn/1.21.7+build.15/yarn-1.21.7+build.15-v2.jar
+       - https://repo.maven.apache.org/maven2/net/fabricmc/yarn/1.21.7+build.15/yarn-1.21.7+build.15.pom
+     Required by:
+         project :
 
-          version = project.mod_version
-          group = project.maven_group
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
 
-          dependencies {
-              minecraft "com.mojang:minecraft:${minecraft_version}"
-              mappings "net.fabricmc:yarn:${yarn_mappings}:v2"
-              modImplementation "net.fabricmc:fabric-loader:${loader_version}"
-              modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
-          }
-
-          tasks.withType(JavaCompile).configureEach {
-              options.release = 21
-          }
-
-          // 移除silentMojangMappingsLicense()，1.6.5版本不支持
-          loom {
-              // 保持其他可能的配置，但移除不存在的方法
-          }
-          EOF
-
-          # gradle.properties
-          cat > gradle.properties << 'EOF'
-          minecraft_version=1.21.7
-          yarn_mappings=1.21.7+build.15
-          loader_version=0.16.15
-          fabric_version=0.110.1+1.21.7
-          mod_version=3.0.7
-          maven_group=com.coloryr
-          archives_base_name=allmusic-client
-          EOF
-
-      - name: 生成Gradle Wrapper
-        run: |
-          gradle wrapper \
-            --gradle-version 8.7 \
-            --distribution-type bin \
-            --no-daemon
-
-      - name: 执行构建
-        run: |
-          chmod +x gradlew
-          ./gradlew clean build --stacktrace
-
-      - name: 上传构建产物
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: allmusic-1.21.7-fabric
-          path: build/libs/*.jar
+BUILD FAILED in 25s
+Error: Process completed with exit code 1.
