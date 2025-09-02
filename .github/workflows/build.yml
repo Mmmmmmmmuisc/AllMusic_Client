@@ -6,47 +6,60 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      FABRIC_REPO_URL: "https://maven.fabricmc.net/"
+      YARN_VERSION: "1.21.7+build.15"
+      GRADLE_VERSION: "8.7"
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 设置Java 21环境
+      - name: 清理缓存
+        run: |
+          rm -rf ~/.gradle/caches/modules-2/files-2.1/net.fabricmc/yarn/
+          rm -rf ./.gradle/loom-cache/
+          rm -rf ~/.gradle/caches/fabric-loom/
+          rm -rf ~/.gradle/wrapper/dists/gradle-${{ env.GRADLE_VERSION }}-bin/
+
+      - name: 设置Java 21
         uses: actions/setup-java@v4
         with:
           java-version: "21"
           distribution: "temurin"
           cache: gradle
+          cache-dependency-path: |
+            gradle/wrapper/gradle-wrapper.properties
+            build.gradle
 
-      - name: 安装Gradle 8.7
+      - name: 安装Gradle
         run: |
-          wget https://services.gradle.org/distributions/gradle-8.7-bin.zip -O gradle.zip
+          wget "https://services.gradle.org/distributions/gradle-${{ env.GRADLE_VERSION }}-bin.zip" -O gradle.zip
           unzip -q gradle.zip
-          export GRADLE_HOME=$(pwd)/gradle-8.7
+          export GRADLE_HOME=$(pwd)/gradle-${{ env.GRADLE_VERSION }}
           echo "$GRADLE_HOME/bin" >> $GITHUB_PATH
           gradle --version
 
-      - name: 创建Gradle配置文件
+      - name: 创建配置文件
         run: |
-          # 创建settings.gradle
-          cat > settings.gradle << 'EOF'
+          cat > settings.gradle << EOF
           pluginManagement {
               repositories {
-                  maven { url "https://maven.fabricmc.net/" }
+                  maven { url "${{ env.FABRIC_REPO_URL }}" }
                   gradlePluginPortal()
               }
           }
           rootProject.name = "allmusic-client"
           EOF
 
-          # 创建build.gradle
-          cat > build.gradle << 'EOF'
+          cat > build.gradle << EOF
           plugins {
               id 'fabric-loom' version '1.6.5'
               id 'maven-publish'
           }
 
           repositories {
-              maven { url "https://maven.fabricmc.net/" }
+              maven { url "${{ env.FABRIC_REPO_URL }}" }
               mavenCentral()
           }
 
@@ -54,24 +67,30 @@ jobs:
           group = project.maven_group
 
           dependencies {
-              minecraft "com.mojang:minecraft:${minecraft_version}"
-              mappings "net.fabricmc:yarn:${yarn_mappings}:v2"
-              modImplementation "net.fabricmc:fabric-loader:${loader_version}"
-              modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
+              minecraft "com.mojang:minecraft:\${minecraft_version}"
+              mappings "net.fabricmc:yarn:${{ env.YARN_VERSION }}:v2"
+              modImplementation "net.fabricmc:fabric-loader:\${loader_version}"
+              modImplementation "net.fabricmc.fabric-api:fabric-api:\${fabric_version}"
           }
 
           tasks.withType(JavaCompile).configureEach {
               options.release = 21
+              options.encoding = "UTF-8"
           }
 
           loom {
+              remapJar { enabled = true }
+          }
+
+          tasks.named('jar') {
+              archiveBaseName.set("AllMusic-\${project.mod_version}-1.21.7")
+              archiveClassifier.set("fabric")
           }
           EOF
 
-          # 创建gradle.properties（使用官方存在的Yarn版本）
-          cat > gradle.properties << 'EOF'
+          cat > gradle.properties << EOF
           minecraft_version=1.21.7
-          yarn_mappings=1.21.7+build.10
+          yarn_mappings=${{ env.YARN_VERSION }}
           loader_version=0.16.15
           fabric_version=0.110.1+1.21.7
           mod_version=3.0.7
@@ -79,21 +98,30 @@ jobs:
           archives_base_name=allmusic-client
           EOF
 
-      - name: 生成Gradle Wrapper
+      - name: 生成Wrapper
         run: |
           gradle wrapper \
-            --gradle-version 8.7 \
+            --gradle-version ${{ env.GRADLE_VERSION }} \
             --distribution-type bin \
             --no-daemon
 
       - name: 执行构建
         run: |
           chmod +x gradlew
-          ./gradlew clean build --stacktrace
+          ./gradlew clean build --stacktrace --info
 
-      - name: 上传构建产物
+      - name: 上传产物
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: allmusic-1.21.7-fabric
+          name: AllMusic-1.21.7-Fabric
           path: "build/libs/*.jar"
+
+      - name: 上传错误日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-errors
+          path: |
+            build/reports/
+            ~/.gradle/caches/
