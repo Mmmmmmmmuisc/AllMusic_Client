@@ -1,10 +1,6 @@
 name: Build AllMusic 1.21.7 Fabric
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -22,24 +18,27 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    - name: 生成Gradle Wrapper文件（包含gradlew）
-      run: |
-        # 手动生成gradlew和相关配置文件，适配8.7版本
-        gradle wrapper --gradle-version 8.7
+    - name: 生成Gradle Wrapper文件
+      run: gradle wrapper --gradle-version 8.7
 
     - name: 配置1.21.7版本参数
       run: |
-        echo "minecraft_version=1.21.7" >> gradle.properties
+        # 替换现有配置而非追加（避免重复配置）
+        echo "minecraft_version=1.21.7" > gradle.properties
         echo "yarn_mappings=1.21.7+build.12" >> gradle.properties
         echo "loader_version=0.16.15" >> gradle.properties
         echo "fabric_version=0.109.0+1.21.7" >> gradle.properties
+        echo "mod_version=3.0.7" >> gradle.properties
+        echo "maven_group=com.coloryr" >> gradle.properties
+        echo "archives_base_name=allmusic-client" >> gradle.properties
 
-    - name: 执行构建命令
+    - name: 执行构建（显示详细日志）
       run: |
-        chmod +x gradlew  # 赋予执行权限
-        ./gradlew clean build
+        chmod +x gradlew
+        ./gradlew clean build --stacktrace  # 添加--stacktrace显示详细错误
 
-    - name: 上传构建产物
+    - name: 上传构建产物（若成功）
+      if: success()  # 仅当构建成功时上传
       uses: actions/upload-artifact@v4
       with:
         name: allmusic-1.21.7-fabric
