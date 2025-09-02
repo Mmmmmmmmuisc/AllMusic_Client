@@ -16,16 +16,23 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 清理旧环境
+      - name: 清理旧环境（修复版）
         run: |
-          sudo apt-get purge -y gradle
-          sudo rm -rf /usr/share/gradle/
+          # 尝试删除系统Gradle，允许失败
+          sudo apt-get purge -y gradle || echo "系统无apt安装的Gradle"
+          # 强制清理可能的安装目录
+          sudo rm -rf /usr/share/gradle/ /opt/gradle/
+          # 清理缓存和项目残留
           rm -rf ~/.gradle/ ~/.cache/gradle/
           rm -rf ${{ env.ROOT_DIR }}/.gradle/ ${{ env.ROOT_DIR }}/gradle/
           rm -f ${{ env.ROOT_DIR }}/gradlew* ${{ env.ROOT_DIR }}/*.gradle
+          # 验证是否有残留的gradle命令
           if command -v gradle &> /dev/null; then
-              echo "错误：未彻底清理旧Gradle" && exit 1
+              echo "发现残留Gradle：$(which gradle)"
+              rm -rf $(which gradle)
+              if command -v gradle &> /dev/null; then exit 1; fi
           fi
+          echo "✅ 环境清理完成"
 
       - name: 配置Java 21
         uses: actions/setup-java@v4
